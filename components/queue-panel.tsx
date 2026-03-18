@@ -37,8 +37,8 @@ interface QueueItem {
 const queueItems: QueueItem[] = [
   {
     id: "1",
-    prompt: "A majestic eagle soaring through mountain peaks at golden hour",
-    model: "Wan 2.2 Pro",
+    prompt: "A drone shot over snowy pine trees at sunrise, cinematic",
+    model: "WAN 2.2 Cinematic",
     status: "generating",
     progress: 67,
     type: "video",
@@ -47,8 +47,8 @@ const queueItems: QueueItem[] = [
   },
   {
     id: "2",
-    prompt: "Cyberpunk street scene with neon reflections on wet pavement",
-    model: "LTX Cinema",
+    prompt: "Gentle camera push-in with drifting fog over still portrait",
+    model: "WAN 2.2 Directed",
     status: "pending",
     type: "video",
     createdAt: "3m ago",
@@ -56,28 +56,28 @@ const queueItems: QueueItem[] = [
   },
   {
     id: "3",
-    prompt: "Abstract geometric patterns morphing in 3D space",
-    model: "FLUX.1 [pro]",
+    prompt: "Portrait of a woman, soft studio lighting, f1.8, canon 85mm",
+    model: "CyberRealistic Photo (SD1.5)",
     status: "completed",
     type: "image",
     createdAt: "10m ago"
   },
   {
     id: "4",
-    prompt: "Ancient forest with mystical fog and sunbeams",
-    model: "SDXL 1.0",
+    prompt: "Scandinavian living room staging with reclaimed oak cabinet",
+    model: "Copax TimeLess XIV (SDXL)",
     status: "completed",
     type: "image",
     createdAt: "15m ago"
   },
   {
     id: "5",
-    prompt: "Underwater coral reef ecosystem teeming with life",
-    model: "Wan 2.2 Base",
+    prompt: "Cinematic reveal with handheld energy, Dr34mL4y scene",
+    model: "LTX-2.3 + Dr34mL4y LoRA",
     status: "failed",
     type: "video",
     createdAt: "20m ago",
-    error: "VRAM allocation failed. Try reducing resolution."
+    error: "VRAM allocation failed. Try reducing resolution or steps."
   },
 ]
 

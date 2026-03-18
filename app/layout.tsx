@@ -7,9 +7,8 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: 'NexGen Studio - AI Image & Video Generation',
-  description: 'Professional AI-powered image and video generation platform with multiple model families including Wan2.2, LTX-2.3, Stable Diffusion, and more.',
-  generator: 'v0.app',
+  title: 'HolmAI WebUI - AI Image, Video & Text Generation',
+  description: 'Professional AI-powered generation platform with WAN 2.2 video, LTX-2.3 + Dr34mL4y LoRA, ComfyUI image generation, salvage reuse staging, and Qwen text assistant.',
   icons: {
     icon: [
       {
