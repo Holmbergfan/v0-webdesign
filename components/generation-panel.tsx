@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -23,155 +23,386 @@ import {
   Check,
   Type,
   Wand2,
-  House,
-  MessageSquare
+  MessageSquare,
+  Loader2,
+  Film
 } from "lucide-react"
 
-type GenerationMode = "t2v" | "i2v" | "ti2v" | "t2i" | "i2i" | "t2t"
+// ── Types matching the backend catalog exactly ──────────────────────────
 
-interface Preset {
-  id: string
+type GenerationType = "t2v" | "i2v" | "ti2v" | "t2i" | "t2t"
+
+type PresetId =
+  | "wan-2-2-t2v-cinematic"
+  | "wan-2-2-i2v-animate"
+  | "wan-2-2-ti2v-directed"
+  | "wan-2-2-ti2v-turbo"
+  | "comfyui-realistic-photo"
+  | "comfyui-realistic-pony"
+  | "comfyui-timeless"
+  | "comfyui-big-love"
+  | "salvage-listing-writer"
+  | "reuse-ideas-generator"
+  | "dr34ml4y-missionary"
+  | "dr34ml4y-blowjob"
+  | "dr34ml4y-double-bj"
+  | "dr34ml4y-cowgirl"
+  | "dr34ml4y-doggy"
+
+interface PresetConfig {
+  id: PresetId
   name: string
   shortName: string
   description: string
   modelFamily: string
+  workflow: string
+  generationType: GenerationType
+  needsImage: boolean
+  needsPrompt: boolean
+  isVideo: boolean
+  defaults: {
+    prompt?: string
+    duration?: number
+    fps?: number
+    steps?: number
+    guidanceScale?: number
+    strength?: number
+  }
+  maxSteps?: number
 }
 
-interface GenerationTypeConfig {
-  id: GenerationMode
-  label: string
-  icon: any
-  presets: Preset[]
+// ── Generation types (tabs) ─────────────────────────────────────────────
+
+const GENERATION_TABS: { id: GenerationType; label: string; icon: any }[] = [
+  { id: "t2v", label: "Text to Video", icon: Video },
+  { id: "i2v", label: "Image to Video", icon: ImageIcon },
+  { id: "ti2v", label: "Text+Image to Video", icon: Wand2 },
+  { id: "t2i", label: "Text to Image", icon: ImageIcon },
+  { id: "t2t", label: "Text Assistant", icon: MessageSquare },
+]
+
+// ── Presets — one entry per backend preset, grouped by generation type ──
+
+const PRESETS: PresetConfig[] = [
+  // ─ T2V: WAN 2.2 text-to-video ─
+  {
+    id: "wan-2-2-t2v-cinematic", generationType: "t2v",
+    name: "WAN 2.2 Cinematic Motion", shortName: "Cinematic",
+    description: "Baseline text-to-video for short cinematic clips.",
+    modelFamily: "Wan 2.2", workflow: "runpod-wan-video",
+    needsImage: false, needsPrompt: true, isVideo: true,
+    defaults: { duration: 4, fps: 16, steps: 20, guidanceScale: 7.5 },
+    maxSteps: 40,
+  },
+
+  // ─ I2V: WAN 2.2 image animator ─
+  {
+    id: "wan-2-2-i2v-animate", generationType: "i2v",
+    name: "WAN 2.2 Image Animator", shortName: "Animate",
+    description: "Animate a still image with optional motion direction.",
+    modelFamily: "Wan 2.2", workflow: "runpod-wan-video",
+    needsImage: true, needsPrompt: false, isVideo: true,
+    defaults: { duration: 4, fps: 16, steps: 20, guidanceScale: 7.5, strength: 0.75 },
+    maxSteps: 40,
+  },
+
+  // ─ TI2V: WAN 2.2 text+image-to-video (Directed & Turbo) ─
+  {
+    id: "wan-2-2-ti2v-directed", generationType: "ti2v",
+    name: "WAN 2.2 Directed Motion", shortName: "Directed",
+    description: "Use image and prompt together for more controlled video.",
+    modelFamily: "Wan 2.2", workflow: "runpod-wan-video",
+    needsImage: true, needsPrompt: true, isVideo: true,
+    defaults: { duration: 4, fps: 16, steps: 20, guidanceScale: 7.5, strength: 0.75 },
+    maxSteps: 40,
+  },
+  {
+    id: "wan-2-2-ti2v-turbo", generationType: "ti2v",
+    name: "WAN 2.2 Turbo Iteration", shortName: "Turbo",
+    description: "Lower-step preset for quicker iteration and prompt testing.",
+    modelFamily: "Wan 2.2", workflow: "runpod-wan-video",
+    needsImage: true, needsPrompt: true, isVideo: true,
+    defaults: { duration: 4, fps: 16, steps: 4, guidanceScale: 7.5, strength: 0.75 },
+    maxSteps: 20,
+  },
+
+  // ─ T2I: ComfyUI image generation with different checkpoints ─
+  {
+    id: "comfyui-realistic-photo", generationType: "t2i",
+    name: "Realistic Photo", shortName: "Realistic",
+    description: "Photorealistic images using CyberRealistic SD1.5.",
+    modelFamily: "SD 1.5 (CyberRealistic)", workflow: "runpod-comfyui",
+    needsImage: false, needsPrompt: true, isVideo: false,
+    defaults: { steps: 30, guidanceScale: 7 },
+    maxSteps: 60,
+  },
+  {
+    id: "comfyui-realistic-pony", generationType: "t2i",
+    name: "Realistic Pony", shortName: "Pony",
+    description: "High-detail SDXL/Pony generation. Quality tags added automatically.",
+    modelFamily: "SDXL / Pony (CyberRealistic Pony v16)", workflow: "runpod-comfyui",
+    needsImage: false, needsPrompt: true, isVideo: false,
+    defaults: { steps: 30, guidanceScale: 7 },
+    maxSteps: 60,
+  },
+  {
+    id: "comfyui-timeless", generationType: "t2i",
+    name: "TimeLess", shortName: "TimeLess",
+    description: "Versatile SDXL generation using Copax TimeLess XPlus-2B.",
+    modelFamily: "SDXL (Copax TimeLess)", workflow: "runpod-comfyui",
+    needsImage: false, needsPrompt: true, isVideo: false,
+    defaults: { steps: 30, guidanceScale: 7 },
+    maxSteps: 60,
+  },
+  {
+    id: "comfyui-big-love", generationType: "t2i",
+    name: "Big Love", shortName: "Big Love",
+    description: "Soft photographic SDXL using Big Love Hyper1.",
+    modelFamily: "SDXL (Big Love Hyper1)", workflow: "runpod-comfyui",
+    needsImage: false, needsPrompt: true, isVideo: false,
+    defaults: { steps: 30, guidanceScale: 7 },
+    maxSteps: 60,
+  },
+
+  // ─ T2T: Qwen text assistant ─
+  {
+    id: "salvage-listing-writer", generationType: "t2t",
+    name: "Salvage Listing Writer", shortName: "Listings",
+    description: "Turn rough notes into polished listing copy.",
+    modelFamily: "Qwen 2.5 3B Instruct", workflow: "runpod-qwen-text",
+    needsImage: false, needsPrompt: true, isVideo: false,
+    defaults: {},
+  },
+  {
+    id: "reuse-ideas-generator", generationType: "t2t",
+    name: "Reuse Ideas Generator", shortName: "Reuse Ideas",
+    description: "Generate practical second-life concepts and staging ideas.",
+    modelFamily: "Qwen 2.5 3B Instruct", workflow: "runpod-qwen-text",
+    needsImage: false, needsPrompt: true, isVideo: false,
+    defaults: {},
+  },
+
+  // ─ Dr34mL4y scenes: LTX-2.3 + LoRA, these are ti2v under the hood
+  //   but shown as their own "Scenes" section within TI2V or as a separate tab.
+  //   Backend workflow: runpod-ltx-video, requires image + has built-in prompts.
+  {
+    id: "dr34ml4y-missionary", generationType: "ti2v",
+    name: "Dr34mL4y Missionary", shortName: "Missionary",
+    description: "LTX-2.3 + Dr34mL4y LoRA scene generation.",
+    modelFamily: "LTX-2.3 + Dr34mL4y LoRA", workflow: "runpod-ltx-video",
+    needsImage: true, needsPrompt: false, isVideo: true,
+    defaults: { duration: 4, fps: 24, steps: 8, guidanceScale: 7, strength: 0.85 },
+    maxSteps: 16,
+  },
+  {
+    id: "dr34ml4y-blowjob", generationType: "ti2v",
+    name: "Dr34mL4y Blowjob", shortName: "BJ",
+    description: "LTX-2.3 + Dr34mL4y LoRA scene generation.",
+    modelFamily: "LTX-2.3 + Dr34mL4y LoRA", workflow: "runpod-ltx-video",
+    needsImage: true, needsPrompt: false, isVideo: true,
+    defaults: { duration: 4, fps: 24, steps: 8, guidanceScale: 7, strength: 0.85 },
+    maxSteps: 16,
+  },
+  {
+    id: "dr34ml4y-double-bj", generationType: "ti2v",
+    name: "Dr34mL4y Double BJ", shortName: "Double BJ",
+    description: "LTX-2.3 + Dr34mL4y LoRA scene generation.",
+    modelFamily: "LTX-2.3 + Dr34mL4y LoRA", workflow: "runpod-ltx-video",
+    needsImage: true, needsPrompt: false, isVideo: true,
+    defaults: { duration: 4, fps: 24, steps: 8, guidanceScale: 7, strength: 0.85 },
+    maxSteps: 16,
+  },
+  {
+    id: "dr34ml4y-cowgirl", generationType: "ti2v",
+    name: "Dr34mL4y Cowgirl", shortName: "Cowgirl",
+    description: "LTX-2.3 + Dr34mL4y LoRA scene generation.",
+    modelFamily: "LTX-2.3 + Dr34mL4y LoRA", workflow: "runpod-ltx-video",
+    needsImage: true, needsPrompt: false, isVideo: true,
+    defaults: { duration: 4, fps: 24, steps: 8, guidanceScale: 7, strength: 0.85 },
+    maxSteps: 16,
+  },
+  {
+    id: "dr34ml4y-doggy", generationType: "ti2v",
+    name: "Dr34mL4y Doggy", shortName: "Doggy",
+    description: "LTX-2.3 + Dr34mL4y LoRA scene generation.",
+    modelFamily: "LTX-2.3 + Dr34mL4y LoRA", workflow: "runpod-ltx-video",
+    needsImage: true, needsPrompt: false, isVideo: true,
+    defaults: { duration: 4, fps: 24, steps: 8, guidanceScale: 7, strength: 0.85 },
+    maxSteps: 16,
+  },
+]
+
+function getPresetsForType(type: GenerationType) {
+  return PRESETS.filter((p) => p.generationType === type)
 }
 
-const generationTypes: GenerationTypeConfig[] = [
-  {
-    id: "t2v",
-    label: "Text to Video",
-    icon: Video,
-    presets: [
-      { id: "wan-2-2-t2v-cinematic", name: "WAN 2.2 Cinematic Motion", shortName: "Cinematic", description: "Baseline text-to-video for short cinematic clips", modelFamily: "Wan 2.2" },
-    ]
-  },
-  {
-    id: "i2v",
-    label: "Image to Video",
-    icon: ImageIcon,
-    presets: [
-      { id: "wan-2-2-i2v-animate", name: "WAN 2.2 Image Animator", shortName: "Animate", description: "Animate a still image with optional motion direction", modelFamily: "Wan 2.2" },
-    ]
-  },
-  {
-    id: "ti2v",
-    label: "Text + Image to Video",
-    icon: Wand2,
-    presets: [
-      { id: "wan-2-2-ti2v-directed", name: "WAN 2.2 Directed Motion", shortName: "Directed", description: "Image and prompt together for more controlled video", modelFamily: "Wan 2.2" },
-      { id: "wan-2-2-ti2v-turbo", name: "WAN 2.2 Turbo Iteration", shortName: "Turbo", description: "Lower-step preset for quicker iteration", modelFamily: "Wan 2.2" },
-      { id: "dr34ml4y-missionary", name: "Dr34mL4y Missionary", shortName: "Missionary", description: "LTX-2.3 + Dr34mL4y LoRA scene", modelFamily: "LTX-2.3 + Dr34mL4y LoRA" },
-      { id: "dr34ml4y-blowjob", name: "Dr34mL4y Blowjob", shortName: "BJ", description: "LTX-2.3 + Dr34mL4y LoRA scene", modelFamily: "LTX-2.3 + Dr34mL4y LoRA" },
-      { id: "dr34ml4y-double-bj", name: "Dr34mL4y Double BJ", shortName: "Double", description: "LTX-2.3 + Dr34mL4y LoRA scene", modelFamily: "LTX-2.3 + Dr34mL4y LoRA" },
-      { id: "dr34ml4y-cowgirl", name: "Dr34mL4y Cowgirl", shortName: "Cowgirl", description: "LTX-2.3 + Dr34mL4y LoRA scene", modelFamily: "LTX-2.3 + Dr34mL4y LoRA" },
-      { id: "dr34ml4y-doggy", name: "Dr34mL4y Doggy", shortName: "Doggy", description: "LTX-2.3 + Dr34mL4y LoRA scene", modelFamily: "LTX-2.3 + Dr34mL4y LoRA" },
-    ]
-  },
-  {
-    id: "t2i",
-    label: "Text to Image",
-    icon: ImageIcon,
-    presets: [
-      { id: "comfyui-realistic-photo", name: "Realistic Photo", shortName: "Realistic", description: "CyberRealistic SD1.5 photorealism", modelFamily: "SD 1.5" },
-      { id: "comfyui-realistic-pony", name: "Realistic Pony", shortName: "Pony", description: "CyberRealistic Pony v16 high-detail SDXL", modelFamily: "SDXL / Pony" },
-      { id: "comfyui-timeless", name: "TimeLess", shortName: "TimeLess", description: "Copax TimeLess XPlus-2B versatile SDXL", modelFamily: "SDXL" },
-      { id: "comfyui-big-love", name: "Big Love", shortName: "Big Love", description: "Big Love Hyper1 soft photographic SDXL", modelFamily: "SDXL" },
-    ]
-  },
-  {
-    id: "i2i",
-    label: "Salvage Reuse",
-    icon: House,
-    presets: [
-      { id: "reclaimed-furniture-staging", name: "Reclaimed Furniture Staging", shortName: "Furniture", description: "Extract and stage furniture in new interiors", modelFamily: "Grounding DINO + SAM + SDXL/FLUX" },
-      { id: "architectural-salvage-placement", name: "Architectural Salvage Placement", shortName: "Architectural", description: "Place salvaged items in new architectural settings", modelFamily: "Grounding DINO + SAM + SD1.5/SDXL" },
-      { id: "interior-design-concept", name: "Interior Design Concept", shortName: "Interior", description: "Transform a room photo into a furnished concept", modelFamily: "Custom Interior Pipeline" },
-    ]
-  },
-  {
-    id: "t2t",
-    label: "Text Assistant",
-    icon: MessageSquare,
-    presets: [
-      { id: "salvage-listing-writer", name: "Salvage Listing Writer", shortName: "Listings", description: "Turn rough notes into polished listing copy", modelFamily: "Qwen 2.5 3B Instruct" },
-      { id: "reuse-ideas-generator", name: "Reuse Ideas Generator", shortName: "Reuse Ideas", description: "Generate practical second-life concepts", modelFamily: "Qwen 2.5 3B Instruct" },
-    ]
-  },
+// ── Duration / FPS options (match backend constraints) ──────────────────
+
+const WAN_DURATIONS = [
+  { value: 2, label: "2s" },
+  { value: 4, label: "4s" },
+  { value: 6, label: "6s" },
 ]
 
-const salvageModelOptions = [
-  { id: "copax-timeless-sdxl", name: "Copax TimeLess XIV", family: "SDXL" },
-  { id: "big-love-sdxl", name: "Big Love Photo5", family: "SDXL" },
-  { id: "cyberrealistic-sd15-inpainting", name: "CyberRealistic Inpainting", family: "SD1.5" },
-  { id: "cyberrealistic-pony", name: "CyberRealistic Pony v16", family: "Pony" },
-  { id: "fluxed-up-flux", name: "Fluxed Up 7.1 FP16", family: "FLUX" },
-  { id: "gonzalomo-v7-photo-xl", name: "GonzaLomo v7 Photo XL", family: "SDXL" },
-  { id: "gonzalomo-v6-photo-xl-non-dmd", name: "GonzaLomo v6 Photo XL Non-DMD", family: "SDXL" },
-  { id: "gonzalomo-v2-pony-dmd", name: "GonzaLomo v2 Pony DMD", family: "Pony" },
-  { id: "gonzalomo-v3-flux-d-aio", name: "GonzaLomo v3 Flux D AIO", family: "FLUX" },
-  { id: "mop-v61-dmd", name: "MoP v6.1 DMD", family: "SDXL" },
-  { id: "mop-mix-epic-realism-pure", name: "MoP Mix Epic Realism Pure", family: "SDXL" },
-  { id: "mop-mix-omnia", name: "MoP Mix Omnia", family: "SDXL" },
+const LTX_DURATIONS = [
+  { value: 2, label: "2s" },
+  { value: 4, label: "4s" },
+  { value: 6, label: "6s" },
 ]
 
-const durations = [
-  { value: "2s", label: "2 seconds" },
-  { value: "4s", label: "4 seconds" },
-  { value: "6s", label: "6 seconds" },
-]
-
-const fpsOptions = [
+const WAN_FPS = [
   { value: 16, label: "16 FPS" },
   { value: 24, label: "24 FPS" },
 ]
 
-const resolutions = [
-  { value: "480p", label: "480p (854x480)" },
-  { value: "720p", label: "720p (1280x720)" },
-  { value: "1080p", label: "1080p (1920x1080)" },
+const LTX_FPS = [
+  { value: 16, label: "16 FPS" },
+  { value: 24, label: "24 FPS" },
 ]
 
+// ── Component ───────────────────────────────────────────────────────────
+
 export function GenerationPanel() {
-  const [mode, setMode] = useState<GenerationMode>("t2v")
-  const [selectedPreset, setSelectedPreset] = useState(generationTypes[0].presets[0])
-  const [selectedSalvageModel, setSelectedSalvageModel] = useState(salvageModelOptions[0])
+  const [mode, setMode] = useState<GenerationType>("t2v")
+  const [selectedPreset, setSelectedPreset] = useState<PresetConfig>(PRESETS[0])
   const [prompt, setPrompt] = useState("")
   const [negativePrompt, setNegativePrompt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [duration, setDuration] = useState("4s")
+  const [duration, setDuration] = useState(4)
   const [fps, setFps] = useState(16)
-  const [resolution, setResolution] = useState("720p")
   const [steps, setSteps] = useState([20])
   const [guidance, setGuidance] = useState([7.5])
   const [strength, setStrength] = useState([0.75])
   const [seed, setSeed] = useState("")
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  const currentType = generationTypes.find(t => t.id === mode) || generationTypes[0]
-  const isVideoMode = mode === "t2v" || mode === "i2v" || mode === "ti2v"
-  const isTextMode = mode === "t2t"
-  const isSalvageMode = mode === "i2i"
-  const needsImage = mode === "i2v" || mode === "ti2v" || mode === "i2i"
-
-  // When mode changes, select the first preset for that mode
+  // When mode changes, pick the first preset of that type and reset controls
   useEffect(() => {
-    const type = generationTypes.find(t => t.id === mode)
-    if (type && type.presets.length > 0) {
-      setSelectedPreset(type.presets[0])
+    const presets = getPresetsForType(mode)
+    if (presets.length > 0) {
+      const p = presets[0]
+      setSelectedPreset(p)
+      applyPresetDefaults(p)
     }
   }, [mode])
+
+  function applyPresetDefaults(p: PresetConfig) {
+    setDuration(p.defaults.duration ?? 4)
+    setFps(p.defaults.fps ?? 16)
+    setSteps([p.defaults.steps ?? 20])
+    setGuidance([p.defaults.guidanceScale ?? 7.5])
+    setStrength([p.defaults.strength ?? 0.75])
+    setSeed("")
+  }
+
+  function selectPreset(p: PresetConfig) {
+    setSelectedPreset(p)
+    applyPresetDefaults(p)
+  }
+
+  const currentPresets = getPresetsForType(mode)
+  const isLTX = selectedPreset.workflow === "runpod-ltx-video"
+  const isWan = selectedPreset.workflow === "runpod-wan-video"
+  const isComfyUI = selectedPreset.workflow === "runpod-comfyui"
+  const isText = selectedPreset.workflow === "runpod-qwen-text"
+  const durationOptions = isLTX ? LTX_DURATIONS : WAN_DURATIONS
+  const fpsOptions = isLTX ? LTX_FPS : WAN_FPS
+
+  // Separate WAN presets from Dr34mL4y presets in TI2V mode
+  const wanPresets = currentPresets.filter((p) => p.workflow === "runpod-wan-video")
+  const ltxPresets = currentPresets.filter((p) => p.workflow === "runpod-ltx-video")
+  const hasMixedPresets = wanPresets.length > 0 && ltxPresets.length > 0
+
+  // ── Submit to /api/generate ───────────────────────────────────────────
+
+  const handleSubmit = useCallback(async () => {
+    setIsSubmitting(true)
+    try {
+      // If we have an image, upload it first to get a URL
+      let imageUrl: string | undefined
+      if (imageFile) {
+        const formData = new FormData()
+        formData.append("file", imageFile)
+        const uploadRes = await fetch("/api/upload", { method: "POST", body: formData })
+        if (!uploadRes.ok) throw new Error("Image upload failed")
+        const uploadData = await uploadRes.json()
+        imageUrl = uploadData.url
+      }
+
+      const body: Record<string, unknown> = {
+        preset_id: selectedPreset.id,
+        generation_type: selectedPreset.generationType,
+        prompt: prompt || undefined,
+        negative_prompt: negativePrompt || undefined,
+        seed: seed || undefined,
+      }
+
+      if (imageUrl) {
+        body.image_url = imageUrl
+      }
+
+      if (selectedPreset.isVideo) {
+        body.duration = duration
+        body.fps = fps
+        body.steps = steps[0]
+        body.guidance_scale = guidance[0]
+        if (selectedPreset.needsImage) {
+          body.strength = strength[0]
+        }
+      } else if (isComfyUI) {
+        body.steps = steps[0]
+        body.guidance_scale = guidance[0]
+      }
+
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || "Generation failed")
+      }
+
+      const data = await res.json()
+      console.log("Job submitted:", data)
+      // TODO: redirect to queue or show toast
+    } catch (err) {
+      console.error("Submit error:", err)
+      // TODO: show error toast
+    } finally {
+      setIsSubmitting(false)
+    }
+  }, [selectedPreset, prompt, negativePrompt, seed, duration, fps, steps, guidance, strength, imageFile, isComfyUI])
+
+  // ── Image upload handler ──────────────────────────────────────────────
+
+  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImageFile(file)
+    const reader = new FileReader()
+    reader.onload = () => setImagePreview(reader.result as string)
+    reader.readAsDataURL(file)
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (!file || !file.type.startsWith("image/")) return
+    setImageFile(file)
+    const reader = new FileReader()
+    reader.onload = () => setImagePreview(reader.result as string)
+    reader.readAsDataURL(file)
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -179,7 +410,7 @@ export function GenerationPanel() {
       <div className={`border-b border-border/50 bg-card/30 px-6 py-4 backdrop-blur-sm ${mounted ? 'animate-slide-up' : 'opacity-0'}`}>
         <div className="flex items-center gap-2 overflow-x-auto">
           <div className="inline-flex rounded-lg bg-secondary p-1">
-            {generationTypes.map((tab) => (
+            {GENERATION_TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setMode(tab.id)}
@@ -201,124 +432,184 @@ export function GenerationPanel() {
       {/* Main Content */}
       <div className="flex-1 overflow-auto p-6">
         <div className={`mx-auto max-w-4xl ${mounted ? 'animate-slide-up animate-delay-100' : 'opacity-0'}`}>
-          {/* Preset Selection */}
+
+          {/* Preset Selection — split into sections when TI2V has WAN + LTX */}
           <div className="mb-6">
             <label className="mb-2 block text-sm font-medium text-foreground">Preset</label>
-            <div className="flex flex-wrap gap-2">
-              {currentType.presets.map((preset) => (
-                <button
-                  key={preset.id}
-                  onClick={() => setSelectedPreset(preset)}
-                  className={cn(
-                    "rounded-lg border px-4 py-2 text-sm font-medium transition-all",
-                    selectedPreset.id === preset.id
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
-                  )}
-                >
-                  {preset.shortName}
-                </button>
-              ))}
-            </div>
+
+            {hasMixedPresets ? (
+              <>
+                {/* WAN 2.2 section */}
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">WAN 2.2</p>
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {wanPresets.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => selectPreset(p)}
+                      className={cn(
+                        "rounded-lg border px-4 py-2 text-sm font-medium transition-all",
+                        selectedPreset.id === p.id
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                      )}
+                    >
+                      {p.shortName}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dr34mL4y / LTX section */}
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Film className="inline h-3 w-3 mr-1" />
+                  Dr34mL4y Scenes (LTX-2.3)
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {ltxPresets.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => selectPreset(p)}
+                      className={cn(
+                        "rounded-lg border px-4 py-2 text-sm font-medium transition-all",
+                        selectedPreset.id === p.id
+                          ? "border-rose-500 bg-rose-500/10 text-rose-500"
+                          : "border-border text-muted-foreground hover:border-rose-500/50 hover:text-foreground"
+                      )}
+                    >
+                      {p.shortName}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {currentPresets.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => selectPreset(p)}
+                    className={cn(
+                      "rounded-lg border px-4 py-2 text-sm font-medium transition-all",
+                      selectedPreset.id === p.id
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                    )}
+                  >
+                    {p.shortName}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <p className="mt-2 text-xs text-muted-foreground">
-              {selectedPreset.description} &middot; {selectedPreset.modelFamily}
+              {selectedPreset.description} &middot; <span className="font-mono">{selectedPreset.modelFamily}</span>
             </p>
           </div>
 
-          {/* Salvage Model Selector (only for i2i mode) */}
-          {isSalvageMode && selectedPreset.id !== "interior-design-concept" && (
-            <div className="mb-6">
-              <label className="mb-2 block text-sm font-medium text-foreground">Staging Model</label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-full justify-between">
-                    <span className="flex items-center gap-2">
-                      <Zap className="h-4 w-4 text-primary" />
-                      {selectedSalvageModel.name}
-                      <span className="text-xs text-muted-foreground">({selectedSalvageModel.family})</span>
-                    </span>
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-80 max-h-80 overflow-y-auto">
-                  <DropdownMenuLabel>Staging Checkpoint</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {salvageModelOptions.map((model) => (
-                    <DropdownMenuItem
-                      key={model.id}
-                      onClick={() => setSelectedSalvageModel(model)}
-                      className="flex items-center justify-between py-3"
-                    >
-                      <div>
-                        <p className="font-medium">{model.name}</p>
-                        <p className="text-xs text-muted-foreground">{model.family}</p>
-                      </div>
-                      {selectedSalvageModel.id === model.id && (
-                        <Check className="h-4 w-4 text-primary" />
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
-
-          {/* Image Upload for modes that need it */}
-          {needsImage && (
+          {/* Image Upload (when preset needs it) */}
+          {selectedPreset.needsImage && (
             <div className="mb-6">
               <label className="mb-2 block text-sm font-medium text-foreground">
-                {isSalvageMode ? "Salvage Photo" : "Source Image"}
+                {isLTX ? "Character Reference" : "Source Image"}
               </label>
-              <div className="flex h-48 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-muted/30 transition-colors hover:border-primary/50 hover:bg-muted/50">
-                <Upload className="mb-3 h-10 w-10 text-muted-foreground" />
-                <p className="text-sm font-medium text-foreground">Drop an image here or click to browse</p>
-                <p className="mt-1 text-xs text-muted-foreground">PNG, JPG, WEBP supported</p>
+              <div
+                className="flex h-48 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-muted/30 transition-colors hover:border-primary/50 hover:bg-muted/50 relative overflow-hidden"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                onClick={() => document.getElementById("image-upload")?.click()}
+              >
+                {imagePreview ? (
+                  <img src={imagePreview} alt="Preview" className="h-full w-full object-contain" />
+                ) : (
+                  <>
+                    <Upload className="mb-3 h-10 w-10 text-muted-foreground" />
+                    <p className="text-sm font-medium text-foreground">Drop an image here or click to browse</p>
+                    <p className="mt-1 text-xs text-muted-foreground">PNG, JPG, WEBP supported</p>
+                  </>
+                )}
+                <input
+                  id="image-upload"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={handleImageUpload}
+                />
+              </div>
+              {imageFile && (
+                <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{imageFile.name}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setImageFile(null); setImagePreview(null) }}
+                    className="text-destructive hover:underline"
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Prompt Input (when preset needs it — skip for Dr34mL4y which has built-in prompts) */}
+          {(selectedPreset.needsPrompt || (!isLTX && !isText)) && (
+            <div className="mb-6">
+              <label className="mb-2 block text-sm font-medium text-foreground">
+                {isText ? "Object Notes / Goal" : "Prompt"}
+                {!selectedPreset.needsPrompt && (
+                  <span className="ml-2 text-xs text-muted-foreground">(optional)</span>
+                )}
+              </label>
+              <div className="relative">
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder={
+                    isText
+                      ? "Vintage teak floor lamp, rewired recently, small scuffs on the base, approx 145cm tall..."
+                      : mode === "t2v"
+                      ? "A drone shot over snowy pine trees at sunrise, cinematic, 4K quality..."
+                      : mode === "i2v"
+                      ? "Gentle camera push-in with drifting fog (optional — leave blank for default motion)"
+                      : mode === "ti2v" && isWan
+                      ? "Slow dolly toward the subject as soft particles drift by"
+                      : isComfyUI
+                      ? "Portrait of a woman, soft studio lighting, f1.8, canon 85mm"
+                      : "Describe what you want..."
+                  }
+                  className="min-h-[120px] w-full resize-none rounded-xl border border-border bg-input p-4 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <div className="absolute bottom-3 right-3">
+                  <span className="text-xs text-muted-foreground">{prompt.length} chars</span>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Prompt Input */}
-          <div className="mb-6">
-            <label className="mb-2 block text-sm font-medium text-foreground">
-              {isTextMode ? "Object Notes / Goal" : isSalvageMode ? "Placement Notes" : "Prompt"}
-            </label>
-            <div className="relative">
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder={
-                  isTextMode
-                    ? "Vintage teak floor lamp, rewired recently, small scuffs on the base, approx 145cm tall..."
-                    : isSalvageMode
-                    ? "Keep the object authentic and slightly worn, but stage it in a calm Nordic living room."
-                    : isVideoMode
-                    ? "A drone shot over snowy pine trees at sunrise, cinematic, 4K quality..."
-                    : "Portrait of a woman, soft studio lighting, f1.8, canon 85mm"
-                }
-                className="min-h-[120px] w-full resize-none rounded-xl border border-border bg-input p-4 text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{prompt.length} chars</span>
-              </div>
+          {/* Dr34mL4y info when a scene preset is selected */}
+          {isLTX && (
+            <div className="mb-6 rounded-xl border border-rose-500/30 bg-rose-500/5 p-4">
+              <p className="text-sm text-foreground">
+                <Film className="inline h-4 w-4 mr-1 text-rose-500" />
+                <strong>{selectedPreset.name}</strong> — This preset uses a built-in optimized prompt.
+                Upload a character reference image above to generate.
+              </p>
             </div>
-          </div>
+          )}
 
-          {/* Quick Settings Row (not for text mode) */}
-          {!isTextMode && (
+          {/* Quick Settings Row (video & image modes, not text) */}
+          {!isText && (
             <div className="mb-6 flex flex-wrap items-center gap-3">
-              {isVideoMode && (
+              {selectedPreset.isVideo && (
                 <>
+                  {/* Duration */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="sm" className="gap-2">
-                        {duration}
+                        {duration}s
                         <ChevronDown className="h-3 w-3" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent>
                       <DropdownMenuLabel>Duration</DropdownMenuLabel>
                       <DropdownMenuSeparator />
-                      {durations.map((d) => (
+                      {durationOptions.map((d) => (
                         <DropdownMenuItem
                           key={d.value}
                           onClick={() => setDuration(d.value)}
@@ -331,6 +622,7 @@ export function GenerationPanel() {
                     </DropdownMenuContent>
                   </DropdownMenu>
 
+                  {/* FPS */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="sm" className="gap-2">
@@ -356,31 +648,6 @@ export function GenerationPanel() {
                 </>
               )}
 
-              {!isSalvageMode && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2">
-                      {resolution}
-                      <ChevronDown className="h-3 w-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    <DropdownMenuLabel>Resolution</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {resolutions.map((r) => (
-                      <DropdownMenuItem
-                        key={r.value}
-                        onClick={() => setResolution(r.value)}
-                        className="flex items-center justify-between"
-                      >
-                        {r.label}
-                        {resolution === r.value && <Check className="h-4 w-4 text-primary" />}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-
               <Button
                 variant={showAdvanced ? "secondary" : "outline"}
                 size="sm"
@@ -392,16 +659,15 @@ export function GenerationPanel() {
               </Button>
 
               <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-                <span>~{isVideoMode ? "2" : "1"} credits</span>
+                <span>~{selectedPreset.isVideo ? "2" : "1"} credits</span>
               </div>
             </div>
           )}
 
           {/* Advanced Settings */}
-          {showAdvanced && !isTextMode && (
+          {showAdvanced && !isText && (
             <div className="mb-6 rounded-2xl border border-border/50 bg-card/50 p-6 backdrop-blur-sm">
               <h3 className="mb-4 text-sm font-semibold text-foreground">Advanced Settings</h3>
-
               <div className="grid gap-6 md:grid-cols-2">
                 {/* Negative Prompt */}
                 <div className="md:col-span-2">
@@ -409,24 +675,26 @@ export function GenerationPanel() {
                   <textarea
                     value={negativePrompt}
                     onChange={(e) => setNegativePrompt(e.target.value)}
-                    placeholder={isSalvageMode ? "duplicate object, warped proportions, floating furniture" : "blurry, distorted, jittery motion"}
+                    placeholder={
+                      selectedPreset.isVideo
+                        ? "blurry, distorted, jittery motion, warping, flicker"
+                        : "blurry, deformed, watermark, ugly, bad anatomy"
+                    }
                     className="min-h-[80px] w-full resize-none rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
 
-                {/* Inference Steps */}
+                {/* Steps */}
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <label className="text-sm font-medium text-foreground">
-                      {isSalvageMode ? "Staging Steps" : "Inference Steps"}
-                    </label>
+                    <label className="text-sm font-medium text-foreground">Inference Steps</label>
                     <span className="text-sm text-muted-foreground">{steps[0]}</span>
                   </div>
                   <Slider
                     value={steps}
                     onValueChange={setSteps}
                     min={4}
-                    max={60}
+                    max={selectedPreset.maxSteps ?? 60}
                     step={1}
                     className="w-full"
                   />
@@ -435,28 +703,24 @@ export function GenerationPanel() {
                 {/* Guidance Scale */}
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <label className="text-sm font-medium text-foreground">
-                      {isSalvageMode ? "Prompt Guidance" : "Guidance Scale"}
-                    </label>
+                    <label className="text-sm font-medium text-foreground">Guidance Scale</label>
                     <span className="text-sm text-muted-foreground">{guidance[0]}</span>
                   </div>
                   <Slider
                     value={guidance}
                     onValueChange={setGuidance}
                     min={1}
-                    max={20}
+                    max={isComfyUI ? 15 : 20}
                     step={0.5}
                     className="w-full"
                   />
                 </div>
 
-                {/* Strength (for image-based modes) */}
-                {(needsImage || isSalvageMode) && (
+                {/* Strength (image-based presets) */}
+                {selectedPreset.needsImage && (
                   <div>
                     <div className="mb-2 flex items-center justify-between">
-                      <label className="text-sm font-medium text-foreground">
-                        {isSalvageMode ? "Reuse Fidelity" : "Image Strength"}
-                      </label>
+                      <label className="text-sm font-medium text-foreground">Image Strength</label>
                       <span className="text-sm text-muted-foreground">{strength[0]}</span>
                     </div>
                     <Slider
@@ -486,10 +750,27 @@ export function GenerationPanel() {
           )}
 
           {/* Generate Button */}
-          <Button className="w-full gap-2 rounded-2xl bg-gradient-to-r from-primary to-accent py-6 text-lg font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30" size="lg">
-            <Sparkles className="h-5 w-5" />
-            {isTextMode ? "Generate Text" : "Generate"}
+          <Button
+            className="w-full gap-2 rounded-2xl bg-gradient-to-r from-primary to-accent py-6 text-lg font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:opacity-50"
+            size="lg"
+            onClick={handleSubmit}
+            disabled={isSubmitting || (selectedPreset.needsPrompt && !prompt.trim()) || (selectedPreset.needsImage && !imageFile)}
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Sparkles className="h-5 w-5" />
+            )}
+            {isSubmitting ? "Submitting..." : isText ? "Generate Text" : "Generate"}
           </Button>
+
+          {/* Validation hint */}
+          {(selectedPreset.needsPrompt && !prompt.trim()) && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">Enter a prompt to generate</p>
+          )}
+          {(selectedPreset.needsImage && !imageFile) && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">Upload an image to generate</p>
+          )}
         </div>
       </div>
     </div>

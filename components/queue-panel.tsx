@@ -38,7 +38,7 @@ const queueItems: QueueItem[] = [
   {
     id: "1",
     prompt: "A drone shot over snowy pine trees at sunrise, cinematic",
-    model: "WAN 2.2 Cinematic",
+    model: "WAN 2.2 Cinematic (T2V)",
     status: "generating",
     progress: 67,
     type: "video",
@@ -47,8 +47,8 @@ const queueItems: QueueItem[] = [
   },
   {
     id: "2",
-    prompt: "Gentle camera push-in with drifting fog over still portrait",
-    model: "WAN 2.2 Directed",
+    prompt: "Slow dolly toward the subject as soft particles drift by",
+    model: "WAN 2.2 Directed (TI2V)",
     status: "pending",
     type: "video",
     createdAt: "3m ago",
@@ -57,27 +57,27 @@ const queueItems: QueueItem[] = [
   {
     id: "3",
     prompt: "Portrait of a woman, soft studio lighting, f1.8, canon 85mm",
-    model: "CyberRealistic Photo (SD1.5)",
+    model: "Realistic Photo (ComfyUI SD1.5)",
     status: "completed",
     type: "image",
     createdAt: "10m ago"
   },
   {
     id: "4",
-    prompt: "Scandinavian living room staging with reclaimed oak cabinet",
-    model: "Copax TimeLess XIV (SDXL)",
+    prompt: "Cinematic still, golden hour, woman in a field, 35mm film grain",
+    model: "TimeLess (ComfyUI SDXL)",
     status: "completed",
     type: "image",
     createdAt: "15m ago"
   },
   {
     id: "5",
-    prompt: "Cinematic reveal with handheld energy, Dr34mL4y scene",
+    prompt: "Dr34mL4y Cowgirl scene with character reference",
     model: "LTX-2.3 + Dr34mL4y LoRA",
     status: "failed",
     type: "video",
     createdAt: "20m ago",
-    error: "VRAM allocation failed. Try reducing resolution or steps."
+    error: "VRAM allocation failed. Try reducing duration or steps."
   },
 ]
 

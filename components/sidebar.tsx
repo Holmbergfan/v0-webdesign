@@ -27,7 +27,6 @@ import {
   ChevronRight,
   Menu,
   X,
-  House,
   MessageSquare,
   Wand2
 } from "lucide-react"
@@ -49,9 +48,8 @@ const menuItems = [
 const quickActions = [
   { label: "Text to Video", icon: Video, mode: "t2v" },
   { label: "Image to Video", icon: ImageIcon, mode: "i2v" },
-  { label: "TI2V / Dr34mL4y", icon: Wand2, mode: "ti2v" },
+  { label: "TI2V / Scenes", icon: Wand2, mode: "ti2v" },
   { label: "Text to Image", icon: ImageIcon, mode: "t2i" },
-  { label: "Salvage Reuse", icon: House, mode: "i2i" },
   { label: "Text Assistant", icon: MessageSquare, mode: "t2t" },
 ]
 
@@ -141,7 +139,7 @@ export function Sidebar({ open, onToggle, activeView, onViewChange }: SidebarPro
             <p className="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Quick Generate
             </p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {quickActions.map((action) => (
                 <button
                   key={action.mode}
